@@ -66,3 +66,9 @@ debug_*.py
 .codegraph/
 .codegraphignore
 .serena/
+
+# Partial downloads from yt-dlp/ffmpeg
+*.part
+*.ytdl
+temp_*.mkv
+temp_*.mp4

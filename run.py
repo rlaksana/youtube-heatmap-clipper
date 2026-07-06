@@ -27,6 +27,37 @@ OUTPUT_RATIO = "9:16"
 OUT_WIDTH = 720
 OUT_HEIGHT = 1280
 
+# Cookies for yt-dlp. Path to Firefox profile folder (containing
+# cookies.sqlite). Leave empty to disable (yt-dlp will use no cookies).
+# When set, yt-dlp loads cookies from this profile before signing URLs,
+# so external downloader ffmpeg must NOT be used (ffmpeg cannot carry
+# browser cookies). Set --downloader-args aside and let yt-dlp download
+# natively with cookies in scope.
+FIREFOX_PROFILE = r"G:\My Drive\FirefoxPortable\Data\profile"
+
+
+def yt_dlp_cookie_arg():
+    """Return the yt-dlp flag fragment for Firefox cookies, or [] if disabled."""
+    if not FIREFOX_PROFILE:
+        return []
+    p = FIREFOX_PROFILE.replace("\\", "/")
+    return ["--cookies-from-browser", f"firefox:{p}"]
+
+
+def yt_dlp_invocation(extra):
+    """Build the standard `python -m yt_dlp ...` argv prefix with cookies.
+
+    extra: list of extra flags to append AFTER the common ones (force-ipv4,
+    quiet, etc.). Cookies are inserted AFTER quiet so they apply to all
+    extraction phases.
+    """
+    base = [
+        sys.executable, "-m", "yt_dlp",
+        "--force-ipv4",
+        "--quiet", "--no-warnings",
+    ]
+    return base + yt_dlp_cookie_arg() + list(extra)
+
 
 def set_ratio_preset(preset):
     global OUTPUT_RATIO, OUT_WIDTH, OUT_HEIGHT
@@ -300,7 +331,7 @@ def get_duration(video_id):
         "yt_dlp",
         "--get-duration",
         f"https://youtu.be/{video_id}"
-    ]
+    ] + yt_dlp_cookie_arg()
 
     try:
         res = subprocess.run(cmd, capture_output=True, text=True)
@@ -425,29 +456,34 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
         except Exception:
             pass
 
+    # Note: do NOT use --downloader ffmpeg. When using Firefox cookies,
+    # only yt-dlp's native downloader can carry them to the HTTP request;
+    # ffmpeg (external) cannot, and YouTube returns 403.
     cmd_download = [
         sys.executable, "-m", "yt_dlp",
         "--force-ipv4",
         "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
-        "--downloader-args",
-        f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
+        *yt_dlp_cookie_arg(),
         "--merge-output-format", "mkv",
         "-f",
         "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
         "-o", temp_file,
+        "--external-downloader", "ffmpeg",
+        "--external-downloader-args",
+        f"ffmpeg:-ss {start} -to {end} -hide_banner -loglevel error",
         f"https://youtu.be/{video_id}"
     ]
     cmd_download_fallback = [
         sys.executable, "-m", "yt_dlp",
         "--force-ipv4",
         "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
-        "--downloader-args",
-        f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
+        *yt_dlp_cookie_arg(),
         "--merge-output-format", "mkv",
         "-f", "bv*+ba/b",
         "-o", temp_file,
+        "--external-downloader", "ffmpeg",
+        "--external-downloader-args",
+        f"ffmpeg:-ss {start} -to {end} -hide_banner -loglevel error",
         f"https://youtu.be/{video_id}"
     ]
 
