@@ -488,7 +488,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     cropped_file
                 ]
             else:
-                vf = build_cover_scale_crop_vf(out_w, out_h)
+                vf = build_cover_scale_crop_vf(out_w, out_h) + ",setpts=PTS-STARTPTS"
                 cmd_crop = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
@@ -499,7 +499,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 ]
         elif crop_mode == "split_left":
             if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
-                vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
+                vf = (build_cover_scale_crop_vf(out_w or 720, out_h or 1280) + ",setpts=PTS-STARTPTS") if OUTPUT_RATIO != "original" else None
                 cmd_crop = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                     "-i", temp_file,
@@ -516,7 +516,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     f"[scaled]split=2[s1][s2];"
                     f"[s1]crop={out_w}:{top_h}:(iw-{out_w})/2:(ih-{out_h})/2[top];"
                     f"[s2]crop={out_w}:{bottom_h}:0:ih-{bottom_h}[bottom];"
-                    f"[top][bottom]vstack[out]"
+                    f"[top][bottom]vstack,setpts=PTS-STARTPTS[out]"
                 )
                 cmd_crop = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -600,7 +600,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 cmd_subtitle = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                     "-i", cropped_file,
-                    "-vf", f"subtitles='{subtitle_path}'{fontsdir_arg}:force_style='{force_style}'",
+                    "-vf", f"subtitles='{subtitle_path}'{fontsdir_arg}:force_style='{force_style}',setpts=PTS-STARTPTS",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "copy",
                     output_file

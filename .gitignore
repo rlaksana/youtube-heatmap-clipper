@@ -60,3 +60,9 @@ models/
 test.py
 check_*.py
 debug_*.py
+
+# Local tool indexes (machine-specific, generated)
+.grepai/
+.codegraph/
+.codegraphignore
+.serena/

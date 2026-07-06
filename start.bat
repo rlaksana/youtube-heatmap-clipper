@@ -18,18 +18,26 @@ if exist "%VENV_DIR%\Scripts\python.exe" set "PYTHON_CMD=%VENV_DIR%\Scripts\pyth
 if defined PYTHON_CMD goto :DEPS
 
 echo [*] Virtual Environment tidak ditemukan.
-echo [*] Mencoba membuat venv baru dengan Python 3.11...
+echo [*] Mencari Python yang tersedia...
 
-py -3.11 --version >nul 2>nul
-if errorlevel 1 goto :TRY_SYSTEM_PY
+rem --- Probe preferred versions in order: 3.12 -> 3.13 -> 3.11 ---
+set "PY_VER="
+for %%V in (3.12 3.13 3.11) do (
+    if not defined PY_VER (
+        py -%%V --version >nul 2>nul
+        if not errorlevel 1 set "PY_VER=%%V"
+    )
+)
 
-echo [OK] Python 3.11 ditemukan. Membuat venv...
-py -3.11 -m venv "%VENV_DIR%"
-if errorlevel 1 goto :VENV_FAIL
-goto :SET_PY
+if defined PY_VER (
+    echo [OK] Python %PY_VER% ditemukan. Membuat venv...
+    py -%PY_VER% -m venv "%VENV_DIR%"
+    if errorlevel 1 goto :VENV_FAIL
+    goto :SET_PY
+)
 
-:TRY_SYSTEM_PY
-echo [WARN] Python 3.11 tidak ditemukan di system.
+rem --- Fallback to default 'python' on PATH ---
+echo [WARN] Tidak ada py -3.12/3.13/3.11 yang valid.
 echo [*] Menggunakan default 'python' system...
 python --version >nul 2>nul
 if errorlevel 1 goto :NO_PY
@@ -74,6 +82,7 @@ echo       winget install Gyan.FFmpeg
 echo.
 echo   Semua siap! Menjalankan Web App...
 echo   Buka browser di: http://127.0.0.1:5000
+echo   Atau via Tailscale/LAN di: http://100.81.63.42:5000
 echo ===================================================
 echo(
 
