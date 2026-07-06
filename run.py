@@ -3,6 +3,7 @@ import re
 import json
 import sys
 import subprocess
+import signal
 import requests
 import shutil
 from urllib.parse import urlparse, parse_qs
@@ -26,6 +27,76 @@ SUBTITLE_LOCATION = "bottom"
 OUTPUT_RATIO = "9:16"
 OUT_WIDTH = 720
 OUT_HEIGHT = 1280
+
+
+# --- Subprocess streaming & graceful shutdown ----------------------------------
+# Track every subprocess.Popen we start so SIGINT/SIGTERM can terminate them
+# cleanly instead of leaving orphan ffmpeg/yt-dlp processes running.
+_CHILD_PROCESSES = []
+
+
+def _register_child(p):
+    _CHILD_PROCESSES.append(p)
+    return p
+
+
+def _kill_all_children():
+    for p in _CHILD_PROCESSES:
+        if p.poll() is None:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+    for p in _CHILD_PROCESSES:
+        try:
+            p.wait(timeout=2)
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
+    _CHILD_PROCESSES.clear()
+
+
+def _install_signal_handlers():
+    """Trap SIGINT/SIGTERM to kill child processes before exiting."""
+    def handler(signum, frame):
+        sys.stderr.write("\n[INFO] Diterima sinyal berhenti, membersihkan proses...\n")
+        sys.stderr.flush()
+        _kill_all_children()
+        sys.exit(130 if signum == signal.SIGINT else 143)
+    if hasattr(signal, "SIGINT"):
+        signal.signal(signal.SIGINT, handler)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handler)
+
+
+def run_subprocess_stream(cmd, label="cmd"):
+    """Run subprocess and stream stdout/stderr to terminal in real-time.
+
+    Unlike subprocess.run(..., stdout=PIPE), this shows the child's progress
+    (yt-dlp's [download] XX%, ffmpeg's frame counters, etc.) live instead of
+    hiding it until the process exits.
+    """
+    import time as _t
+    proc = _register_child(subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    ))
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+    proc.wait()
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    return proc
+
+
+_install_signal_handlers()
 
 # Cookies for yt-dlp. Path to Firefox profile folder (containing
 # cookies.sqlite). Leave empty to disable (yt-dlp will use no cookies).
@@ -446,9 +517,17 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
     subtitle_file = f"temp_{index}.srt"
     output_file = os.path.join(OUTPUT_DIR, f"clip_{index}.mp4")
 
+    import time as _time
+    _t0 = _time.monotonic()
+
+    def _log(stage, msg):
+        elapsed = int(_time.monotonic() - _t0)
+        print(f"[Clip {index}] [{elapsed:>4}s] {stage}: {msg}", flush=True)
+
     print(
         f"[Clip {index}] Processing segment "
-        f"({int(start)}s - {int(end)}s, padding {PADDING}s)"
+        f"({int(start)}s - {int(end)}s, padding {PADDING}s)",
+        flush=True
     )
     if callable(event_hook):
         try:
@@ -488,26 +567,15 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
     ]
 
     try:
+        _log("download", "memulai yt-dlp (streaming output real-time)")
         try:
-            subprocess.run(
-                cmd_download,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or "").strip()
-            if "Requested format is not available" in stderr:
-                subprocess.run(
-                    cmd_download_fallback,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-            else:
-                raise
+            run_subprocess_stream(cmd_download, label="yt-dlp")
+        except subprocess.CalledProcessError:
+            # Re-run fallback if first attempt failed (e.g. format mismatch).
+            # Output is already streamed live; just retry with broader format.
+            _log("download", "percobaan pertama gagal, retry dengan format fallback")
+            run_subprocess_stream(cmd_download_fallback, label="yt-dlp-fallback")
+        _log("download", f"selesai -> {temp_file}")
 
         if not os.path.exists(temp_file):
             print("Failed to download video segment.")
@@ -599,14 +667,8 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 event_hook("stage", {"stage": "crop", "clip_index": index})
             except Exception:
                 pass
-        print("  Cropping video...")
-        result = subprocess.run(
-            cmd_crop,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+        _log("crop", "memulai ffmpeg crop")
+        run_subprocess_stream(cmd_crop, label="ffmpeg-crop")
 
         os.remove(temp_file)
 
@@ -617,14 +679,15 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     event_hook("stage", {"stage": "subtitle", "clip_index": index})
                 except Exception:
                     pass
-            print("  Generating subtitle...")
+            _log("subtitle", "memulai Whisper transcribe")
             if generate_subtitle(cropped_file, subtitle_file, event_hook=event_hook):
                 if callable(event_hook):
                     try:
                         event_hook("stage", {"stage": "burn_subtitle", "clip_index": index})
                     except Exception:
                         pass
-                print("  Burning subtitle to video...")
+                _log("burn", "memulai ffmpeg burn subtitle")
+                run_subprocess_stream(cmd_subtitle, label="ffmpeg-burn")
                 # Get absolute path for subtitle file
                 subtitle_path = escape_subtitles_filter_path(subtitle_file)
                 fonts_dir = SUBTITLE_FONTS_DIR

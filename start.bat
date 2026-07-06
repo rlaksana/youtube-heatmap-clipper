@@ -88,7 +88,7 @@ echo(
 
 if defined YHC_CHECK_ONLY goto :DONE
 
-"%PYTHON_CMD%" webapp.py
+"%PYTHON_CMD%" -u webapp.py
 goto :DONE
 
 :NO_PY
