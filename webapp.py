@@ -305,4 +305,8 @@ def serve_clip(job_id, filename):
 
 
 if __name__ == "__main__":
+    # Silence Werkzeug access log (UI polling /api/job/<id> floods the terminal).
+    # Keep error log; suppress per-request info lines.
+    import logging
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
     app.run(host="0.0.0.0", port=5000, debug=True)
